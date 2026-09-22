@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FIT to GPX Batch Converter</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- JSZip for Batch Export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    .leaflet-container {
+      background-color: #0f172a;
+    }
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(51, 65, 85, 0.8);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(71, 85, 105, 1);
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased transition-colors duration-200">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-50 backdrop-blur-md bg-slate-900/80 border-b border-slate-800 px-4 lg:px-8 py-3.5 flex items-center justify-between shadow-sm">
+    <div class="flex items-center space-x-3">
+      <div class="bg-gradient-to-tr from-blue-600 to-indigo-500 p-2 rounded-xl text-white shadow-md shadow-blue-500/20">
+        <i data-lucide="layers" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-lg leading-none tracking-tight flex items-center">
+          FIT to GPX <span class="text-[10px] font-mono font-semibold bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20 ml-2">Batch Studio</span>
+        </h1>
+        <p class="text-xs text-slate-400 mt-0.5">100% Browser-Local Garmin Activity Converter</p>
+      </div>
+    </div>
+
+    <div class="flex items-center space-x-3">
+      <div class="hidden sm:flex items-center text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-full">
+        <i data-lucide="shield-check" class="w-3.5 h-3.5 mr-1.5"></i>
+        Client-Side Privacy Guaranteed
+      </div>
+
+      <button id="themeToggleBtn" class="p-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition" title="Toggle Theme">
+        <i data-lucide="sun" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 max-w-6xl w-full mx-auto p-4 md:p-6 space-y-6">
+
+    <!-- Privacy Banner -->
+    <div class="bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-transparent border border-blue-500/20 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm">
+      <div class="flex items-center space-x-3">
+        <i data-lucide="info" class="w-5 h-5 text-blue-400 shrink-0"></i>
+        <p class="text-slate-300">
+          Drag & drop single or multiple Garmin <code class="bg-blue-900/40 text-blue-300 px-1.5 py-0.5 rounded text-xs">.FIT</code> files. Parsing runs entirely in local memory.
+        </p>
+      </div>
+      <button id="loadSampleBatchBtn" class="inline-flex items-center space-x-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2 rounded-xl transition shadow-md shadow-blue-500/20 whitespace-nowrap">
+        <i data-lucide="zap" class="w-3.5 h-3.5"></i>
+        <span>Load Sample Batch (3 Tracks)</span>
+      </button>
+    </div>
+
+    <!-- Drag & Drop Upload Zone -->
+    <div id="dropZone" className="border-2 border-dashed border-slate-800 hover:border-blue-500 rounded-2xl p-6 md:p-10 text-center transition flex flex-col items-center justify-center cursor-pointer bg-slate-900/50 relative group">
+      <input type="file" id="fileInput" accept=".fit,.FIT" multiple class="hidden" />
+      
+      <div class="w-14 h-14 rounded-2xl bg-blue-950/60 flex items-center justify-center text-blue-400 mb-3 shadow-inner border border-blue-900/50 group-hover:scale-105 transition">
+        <i data-lucide="upload-cloud" class="w-7 h-7"></i>
+      </div>
+
+      <h2 class="text-base font-semibold text-slate-100">
+        Drop your Garmin .FIT files here
+      </h2>
+      <p class="text-xs text-slate-400 mt-1">
+        Supports multiple files simultaneously &bull; Select files or folders
+      </p>
+    </div>
+
+    <!-- Active Batch Dashboard Panel -->
+    <div id="batchDashboard" class="hidden space-y-6">
+      
+      <!-- Cumulative Banner -->
+      <div class="bg-slate-900 rounded-2xl p-5 border border-slate-800 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center md:text-left w-full md:w-auto">
+          <div>
+            <p class="text-xs text-slate-400">Total Activities</p>
+            <p id="statTotalFiles" class="text-lg font-bold text-slate-100">0</p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-400">Combined Distance</p>
+            <p id="statTotalDistance" class="text-lg font-bold text-blue-400">0.0 km</p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-400">Total Elev. Gain</p>
+            <p id="statTotalElevation" class="text-lg font-bold text-emerald-400">0 m</p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-400">Units</p>
+            <button id="unitToggleBtn" class="text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg border border-slate-700 mt-0.5">
+              Metric (km/m)
+            </button>
+          </div>
+        </div>
+
+        <!-- Action Controls -->
+        <div class="flex items-center space-x-2 w-full md:w-auto">
+          <button id="downloadZipBtn" class="flex-1 md:flex-initial inline-flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2.5 rounded-xl font-medium text-xs sm:text-sm transition shadow-md shadow-blue-500/20">
+            <i data-lucide="archive" class="w-4 h-4"></i>
+            <span id="zipBtnText">Download All as ZIP</span>
+          </button>
+
+          <button id="clearAllBtn" class="p-2.5 rounded-xl border border-slate-800 hover:bg-red-500/10 text-slate-400 hover:text-red-400 transition" title="Clear Queue">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <div class="flex border-b border-slate-800 space-x-6 text-sm font-medium">
+        <button id="tabQueueBtn" class="pb-3 border-b-2 border-blue-500 text-blue-400 flex items-center space-x-2">
+          <i data-lucide="list" class="w-4 h-4"></i>
+          <span>File Queue (<span id="queueCount">0</span>)</span>
+        </button>
+
+        <button id="tabMapBtn" class="pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2">
+          <i data-lucide="map-pin" class="w-4 h-4"></i>
+          <span>Interactive Map</span>
+        </button>
+
+        <button id="tabXmlBtn" class="pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2">
+          <i data-lucide="code" class="w-4 h-4"></i>
+          <span>GPX Preview</span>
+        </button>
+      </div>
+
+      <!-- TAB 1: Batch File Table -->
+      <div id="tabQueueView" class="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-sm">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs sm:text-sm">
+            <thead class="bg-slate-800/50 text-slate-400 font-semibold border-b border-slate-800">
+              <tr>
+                <th class="p-3.5">Filename</th>
+                <th class="p-3.5">Status</th>
+                <th class="p-3.5">Distance</th>
+                <th class="p-3.5">Duration</th>
+                <th class="p-3.5">Points</th>
+                <th class="p-3.5 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="fileTableBody" class="divide-y divide-slate-800">
+              <!-- Dynamic Rows inserted here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TAB 2: Multi-Track Map -->
+      <div id="tabMapView" class="hidden space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 bg-slate-900 p-3 rounded-xl border border-slate-800 text-xs">
+          <label class="flex items-center space-x-2 cursor-pointer font-medium text-slate-300">
+            <input type="checkbox" id="overlayAllCheckbox" checked class="rounded border-slate-700 bg-slate-800 text-blue-500 focus:ring-blue-500">
+            <span>Overlay All Tracks</span>
+          </label>
+
+          <div class="flex items-center space-x-2">
+            <span class="text-slate-400">Focus Activity:</span>
+            <select id="mapTrackSelect" class="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200 font-medium">
+              <!-- Dynamic options -->
+            </select>
+          </div>
+        </div>
+
+        <div class="relative w-full h-96 rounded-2xl overflow-hidden border border-slate-800 shadow-inner">
+          <div id="map" class="w-full h-full bg-slate-900"></div>
+        </div>
+      </div>
+
+      <!-- TAB 3: GPX Raw XML Preview -->
+      <div id="tabXmlView" class="hidden relative">
+        <pre id="gpxXmlPreview" class="bg-slate-900 text-slate-200 p-4 rounded-2xl text-xs font-mono overflow-x-auto max-h-96 border border-slate-800"></pre>
+        <button id="copyXmlBtn" class="absolute top-3 right-3 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-1.5 rounded-lg border border-slate-700 transition">
+          Copy XML
+        </button>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="mt-auto border-t border-slate-800 py-4 px-4 text-center text-xs text-slate-500">
+    FIT to GPX Batch Converter &bull; Client-Side Binary Processing &bull; Standard GPX 1.1 Compliant
+  </footer>
+
+  <!-- Application Logic Scripts -->
+  <script>
+    // Constants
+    const GARMIN_EPOCH_OFFSET = 631065600;
+    const SEMICIRCLE_TO_DEG = 180 / Math.pow(2, 31);
+    const TRACK_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#6366f1'];
+
+    // State Variables
+    let fileStore = []; // { id, name, size, status, records, stats, gpxXml, color }
+    let selectedFileId = null;
+    let unitSystem = 'metric';
+    let isDarkMode = true;
+    let mapInstance = null;
+
+    // Initialize Lucide Icons
+    lucide.createIcons();
+
+    // DOM Elements
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const batchDashboard = document.getElementById('batchDashboard');
+    const fileTableBody = document.getElementById('fileTableBody');
+    const statTotalFiles = document.getElementById('statTotalFiles');
+    const statTotalDistance = document.getElementById('statTotalDistance');
+    const statTotalElevation = document.getElementById('statTotalElevation');
+    const queueCount = document.getElementById('queueCount');
+    const downloadZipBtn = document.getElementById('downloadZipBtn');
+    const clearAllBtn = document.getElementById('clearAllBtn');
+    const unitToggleBtn = document.getElementById('unitToggleBtn');
+    const loadSampleBatchBtn = document.getElementById('loadSampleBatchBtn');
+    const themeToggleBtn = document.getElementById('themeToggleBtn');
+
+    const tabQueueBtn = document.getElementById('tabQueueBtn');
+    const tabMapBtn = document.getElementById('tabMapBtn');
+    const tabXmlBtn = document.getElementById('tabXmlBtn');
+    const tabQueueView = document.getElementById('tabQueueView');
+    const tabMapView = document.getElementById('tabMapView');
+    const tabXmlView = document.getElementById('tabXmlView');
+
+    const overlayAllCheckbox = document.getElementById('overlayAllCheckbox');
+    const mapTrackSelect = document.getElementById('mapTrackSelect');
+    const gpxXmlPreview = document.getElementById('gpxXmlPreview');
+    const copyXmlBtn = document.getElementById('copyXmlBtn');
+
+    // Drag and Drop Event Listeners
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-blue-500', 'bg-blue-500/5'); });
+    dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('border-blue-500', 'bg-blue-500/5'); });
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('border-blue-500', 'bg-blue-500/5');
+      if (e.dataTransfer.files) handleFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', (e) => { if (e.target.files) handleFiles(e.target.files); });
+
+    // Handle File Intake
+    function handleFiles(files) {
+      const fitFiles = Array.from(files).filter(f => f.name.toLowerCase().endsWith('.fit'));
+      if (fitFiles.length === 0) return;
+
+      fitFiles.forEach(file => {
+        const id = Math.random().toString(36).substring(2, 9);
+        const fileEntry = {
+          id,
+          name: file.name,
+          size: file.size,
+          status: 'parsing',
+          records: [],
+          stats: null,
+          gpxXml: '',
+          color: TRACK_COLORS[fileStore.length % TRACK_COLORS.length]
+        };
+
+        fileStore.push(fileEntry);
+        render();
+
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          try {
+            const records = parseFitBinary(evt.target.result);
+            const stats = calculateTrackStats(records);
+            const gpxXml = generateGpxXml(records, file.name.replace(/\.fit$/i, ''));
+
+            fileEntry.status = 'success';
+            fileEntry.records = records;
+            fileEntry.stats = stats;
+            fileEntry.gpxXml = gpxXml;
+            if (!selectedFileId) selectedFileId = id;
+          } catch (err) {
+            fileEntry.status = 'error';
+            fileEntry.error = err.message || 'Failed to parse file';
+          }
+          render();
+        };
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    function parseFitBinary(arrayBuffer) {
+      const view = new DataView(arrayBuffer);
+      if (arrayBuffer.byteLength < 14) throw new Error('File is too small to be a valid Garmin .FIT file');
+
+      const headerSize = view.getUint8(0);
+      const dataSize = view.getUint32(4, true);
+      const magic = String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11));
+
+      if (magic !== '.FIT') throw new Error('Invalid format (Missing ".FIT" magic header)');
+
+      let offset = headerSize;
+      const endOffset = headerSize + dataSize;
+      const localMsgDefs = {};
+      const records = [];
+
+      while (offset < endOffset && offset < arrayBuffer.byteLength) {
+        const header = view.getUint8(offset++);
+        const isCompressed = (header & 0x80) !== 0;
+
+        if (isCompressed) {
+          const localMsgType = (header >> 5) & 0x03;
+          const def = localMsgDefs[localMsgType];
+          if (def) offset += def.size;
+          continue;
+        }
+
+        const isDefinition = (header & 0x40) !== 0;
+        const localMsgType = header & 0x0F;
+
+        if (isDefinition) {
+          offset += 1; // reserved
+          const isLittleEndian = view.getUint8(offset++) === 0;
+          const globalMessageNum = isLittleEndian ? view.getUint16(offset, true) : view.getUint16(offset, false);
+          offset += 2;
+
+          const numFields = view.getUint8(offset++);
+          const fields = [];
+          let totalSize = 0;
+
+          for (let i = 0; i < numFields; i++) {
+            const fieldDefNum = view.getUint8(offset);
+            const size = view.getUint8(offset + 1);
+            const baseType = view.getUint8(offset + 2);
+            offset += 3;
+            fields.push({ fieldDefNum, size, baseType });
+            totalSize += size;
+          }
+
+          if ((header & 0x20) !== 0) { // Developer fields
+            const numDevFields = view.getUint8(offset++);
+            for (let i = 0; i < numDevFields; i++) {
+              totalSize += view.getUint8(offset + 1);
+              offset += 3;
+            }
+          }
+
+          localMsgDefs[localMsgType] = { globalMessageNum, isLittleEndian, fields, size: totalSize };
+        } else {
+          const def = localMsgDefs[localMsgType];
+          if (!def) break;
+
+          const recordObj = {};
+          for (const f of def.fields) {
+            const val = readFieldValue(view, offset, f.size, f.baseType, def.isLittleEndian);
+            offset += f.size;
+
+            if (def.globalMessageNum === 20) { // Record Message
+              switch (f.fieldDefNum) {
+                case 0: recordObj.lat = val; break;
+                case 1: recordObj.lon = val; break;
+                case 2: recordObj.altitude = val; break;
+                case 3: recordObj.heartRate = val; break;
+                case 4: recordObj.cadence = val; break;
+                case 6: recordObj.speed = val; break;
+                case 13: recordObj.temp = val; break;
+                case 253: recordObj.timestamp = val; break;
+              }
+            }
+          }
+
+          if (def.globalMessageNum === 20 && recordObj.lat !== undefined && recordObj.lon !== undefined) {
+            const lat = recordObj.lat * SEMICIRCLE_TO_DEG;
+            const lon = recordObj.lon * SEMICIRCLE_TO_DEG;
+
+            let ele = recordObj.altitude;
+            if (ele !== undefined && ele !== null && ele > 10000) ele = (ele / 5) - 500;
+
+            if (lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 && (lat !== 0 || lon !== 0)) {
+              records.push({
+                lat,
+                lon,
+                ele: ele !== undefined ? Number(ele.toFixed(2)) : null,
+                timestamp: recordObj.timestamp ? new Date((recordObj.timestamp + GARMIN_EPOCH_OFFSET) * 1000).toISOString() : null,
+                heartRate: recordObj.heartRate || null,
+                cadence: recordObj.cadence || null,
+                temp: recordObj.temp || null
+              });
+            }
+          }
+        }
+      }
+
+      if (records.length === 0) throw new Error('No GPS coordinate records found in file');
+      return records;
+    }
+
+    function readFieldValue(view, offset, size, baseType, isLittleEndian) {
+      try {
+        switch (baseType & 0x0F) {
+          case 0: case 1: case 2: case 10: return view.getUint8(offset);
+          case 3: return view.getInt16(offset, isLittleEndian);
+          case 4: case 11: return view.getUint16(offset, isLittleEndian);
+          case 5: return view.getInt32(offset, isLittleEndian);
+          case 6: case 12: return view.getUint32(offset, isLittleEndian);
+          case 8: return view.getFloat32(offset, isLittleEndian);
+          case 9: return view.getFloat64(offset, isLittleEndian);
+          default: return view.getUint8(offset);
+        }
+      } catch (e) { return 0; }
+    }
+
+    function generateGpxXml(records, name) {
+      const cleanName = name.replace(/[<>&'"]/g, '');
+      const startTime = records[0]?.timestamp || new Date().toISOString();
+
+      let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+      xml += `<gpx version="1.1" creator="FIT to GPX Batch Converter" xmlns="http://www.topografix.com/GPX/1/1" xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">\n`;
+      xml += `  <metadata><name>${cleanName}</name><time>${startTime}</time></metadata>\n`;
+      xml += `  <trk>\n    <name>${cleanName}</name>\n    <trkseg>\n`;
+
+      for (const p of records) {
+        xml += `      <trkpt lat="${p.lat.toFixed(7)}" lon="${p.lon.toFixed(7)}">\n`;
+        if (p.ele !== null) xml += `        <ele>${p.ele}</ele>\n`;
+        if (p.timestamp) xml += `        <time>${p.timestamp}</time>\n`;
+        if (p.heartRate || p.cadence || p.temp) {
+          xml += `        <extensions><gpxtpx:TrackPointExtension>\n`;
+          if (p.heartRate) xml += `          <gpxtpx:hr>${p.heartRate}</gpxtpx:hr>\n`;
+          if (p.cadence) xml += `          <gpxtpx:cad>${p.cadence}</gpxtpx:cad>\n`;
+          if (p.temp) xml += `          <gpxtpx:atemp>${p.temp}</gpxtpx:atemp>\n`;
+          xml += `        </gpxtpx:TrackPointExtension></extensions>\n`;
+        }
+        xml += `      </trkpt>\n`;
+      }
+
+      xml += `    </trkseg>\n  </trk>\n</gpx>`;
+      return xml;
+    }
+
+    function calculateTrackStats(records) {
+      let totalDist = 0;
+      let eleGain = 0;
+
+      for (let i = 1; i < records.length; i++) {
+        const prev = records[i - 1];
+        const curr = records[i];
+        
+        // Haversine
+        const R = 6371000;
+        const dLat = (curr.lat - prev.lat) * Math.PI / 180;
+        const dLon = (curr.lon - prev.lon) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(prev.lat * Math.PI / 180) * Math.cos(curr.lat * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+        totalDist += R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+        if (curr.ele !== null && prev.ele !== null && curr.ele > prev.ele) {
+          eleGain += (curr.ele - prev.ele);
+        }
+      }
+
+      const start = records[0].timestamp ? new Date(records[0].timestamp) : null;
+      const end = records[records.length - 1].timestamp ? new Date(records[records.length - 1].timestamp) : null;
+      const durationSec = (start && end) ? Math.max(0, (end - start) / 1000) : 0;
+
+      return {
+        points: records.length,
+        distKm: totalDist / 1000,
+        distMi: totalDist / 1609.34,
+        eleGainM: Math.round(eleGain),
+        eleGainFt: Math.round(eleGain * 3.28084),
+        durationSec
+      };
+    }
+
+    // Helper Formatters
+    function formatDuration(seconds) {
+      if (!seconds) return '00:00:00';
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = Math.floor(seconds % 60);
+      return [h, m, s].map(v => v < 10 ? '0' + v : v).join(':');
+    }
+
+    function formatFileSize(bytes) {
+      if (!bytes) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    function render() {
+      if (fileStore.length === 0) {
+        batchDashboard.classList.add('hidden');
+        return;
+      }
+
+      batchDashboard.classList.remove('hidden');
+      queueCount.textContent = fileStore.length;
+      statTotalFiles.textContent = fileStore.filter(f => f.status === 'success').length;
+
+      const totalDist = fileStore.filter(f => f.status === 'success').reduce((s, f) => s + (f.stats?.distKm || 0), 0);
+      const totalEle = fileStore.filter(f => f.status === 'success').reduce((s, f) => s + (f.stats?.eleGainM || 0), 0);
+
+      statTotalDistance.textContent = unitSystem === 'metric' ? `${totalDist.toFixed(1)} km` : `${(totalDist * 0.621371).toFixed(1)} mi`;
+      statTotalElevation.textContent = unitSystem === 'metric' ? `${totalEle} m` : `${Math.round(totalEle * 3.28084)} ft`;
+
+      // Render File Queue Table
+      fileTableBody.innerHTML = '';
+      fileStore.forEach(item => {
+        const isSelected = item.id === selectedFileId;
+        const tr = document.createElement('tr');
+        tr.className = `transition hover:bg-slate-800/40 ${isSelected ? 'bg-blue-500/10' : ''}`;
+
+        tr.innerHTML = `
+          <td class="p-3.5">
+            <div class="flex items-center space-x-2">
+              <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color: ${item.color}"></span>
+              <span class="font-medium text-slate-200 truncate max-w-[160px] sm:max-w-xs">${item.name}</span>
+              <span class="text-[10px] text-slate-500">(${formatFileSize(item.size)})</span>
+            </div>
+          </td>
+          <td class="p-3.5">
+            ${item.status === 'parsing' ? '<span class="text-amber-400">Parsing...</span>' : ''}
+            ${item.status === 'success' ? '<span class="text-emerald-400 font-medium">&check; Converted</span>' : ''}
+            ${item.status === 'error' ? `<span class="text-red-400" title="${item.error}">&excl; Error</span>` : ''}
+          </td>
+          <td class="p-3.5 font-mono">${item.stats ? (unitSystem === 'metric' ? `${item.stats.distKm.toFixed(2)} km` : `${item.stats.distMi.toFixed(2)} mi`) : '--'}</td>
+          <td class="p-3.5 font-mono">${item.stats ? formatDuration(item.stats.durationSec) : '--'}</td>
+          <td class="p-3.5 text-slate-400">${item.stats ? item.stats.points : '--'}</td>
+          <td class="p-3.5 text-right space-x-1">
+            ${item.status === 'success' ? `
+              <button onclick="selectFile('${item.id}', 'map')" class="p-1.5 rounded bg-slate-800 hover:bg-blue-600 text-blue-400 hover:text-white transition" title="View Map"><i data-lucide="crosshair" class="w-3.5 h-3.5"></i></button>
+              <button onclick="downloadSingle('${item.id}')" class="p-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white transition" title="Download GPX"><i data-lucide="download" class="w-3.5 h-3.5"></i></button>
+            ` : ''}
+            <button onclick="removeFile('${item.id}')" class="p-1.5 rounded hover:bg-red-500/10 text-slate-500 hover:text-red-400 transition" title="Remove"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+          </td>
+        `;
+        fileTableBody.appendChild(tr);
+      });
+
+      // Update Map Track Select Dropdown options
+      mapTrackSelect.innerHTML = fileStore.filter(f => f.status === 'success').map(f => `
+        <option value="${f.id}" ${f.id === selectedFileId ? 'selected' : ''}>${f.name}</option>
+      `).join('');
+
+      // Update GPX Code Preview
+      const selectedItem = fileStore.find(f => f.id === selectedFileId);
+      if (selectedItem) gpxXmlPreview.textContent = selectedItem.gpxXml || 'No GPX available';
+
+      lucide.createIcons();
+    }
+
+    function updateMap() {
+      if (!window.L) return;
+
+      if (!mapInstance) {
+        mapInstance = L.map('map', { zoomControl: true });
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(mapInstance);
+      } else {
+        mapInstance.eachLayer(layer => {
+          if (layer instanceof L.Polyline || layer instanceof L.Marker) mapInstance.removeLayer(layer);
+        });
+      }
+
+      const showAll = overlayAllCheckbox.checked;
+      const itemsToRender = showAll ? fileStore.filter(f => f.status === 'success') : fileStore.filter(f => f.id === selectedFileId && f.status === 'success');
+
+      if (itemsToRender.length === 0) return;
+
+      const bounds = [];
+      itemsToRender.forEach(item => {
+        const latLngs = item.records.map(r => [r.lat, r.lon]);
+        const polyline = L.polyline(latLngs, { color: item.color, weight: 4, opacity: 0.85 }).addTo(mapInstance);
+        bounds.push(polyline.getBounds());
+
+        const startIcon = L.divIcon({
+          className: 'custom-pin',
+          html: `<div style="background-color: ${item.color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white;"></div>`,
+          iconSize: [12, 12]
+        });
+        L.marker([item.records[0].lat, item.records[0].lon], { icon: startIcon }).addTo(mapInstance);
+      });
+
+      if (bounds.length > 0) {
+        const combinedBounds = bounds.reduce((acc, b) => acc.extend(b), bounds[0]);
+        mapInstance.fitBounds(combinedBounds, { padding: [30, 30] });
+      }
+
+      setTimeout(() => mapInstance.invalidateSize(), 100);
+    }
+
+    // Global Actions
+    window.selectFile = function(id, switchTab) {
+      selectedFileId = id;
+      render();
+      if (switchTab === 'map') {
+        tabMapBtn.click();
+      }
+    };
+
+    window.downloadSingle = function(id) {
+      const item = fileStore.find(f => f.id === id);
+      if (!item || !item.gpxXml) return;
+
+      const blob = new Blob([item.gpxXml], { type: 'application/gpx+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = item.name.replace(/\.fit$/i, '.gpx');
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+
+    window.removeFile = function(id) {
+      fileStore = fileStore.filter(f => f.id !== id);
+      if (selectedFileId === id) selectedFileId = fileStore[0]?.id || null;
+      render();
+      if (tabMapView.classList.contains('hidden') === false) updateMap();
+    };
+
+    // Download All as ZIP
+    downloadZipBtn.addEventListener('click', async () => {
+      const validItems = fileStore.filter(f => f.status === 'success' && f.gpxXml);
+      if (validItems.length === 0) return;
+
+      const zip = new JSZip();
+      validItems.forEach(item => {
+        zip.file(item.name.replace(/\.fit$/i, '.gpx'), item.gpxXml);
+      });
+
+      const content = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(content);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Garmin_Converted_GPX_${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    clearAllBtn.addEventListener('click', () => {
+      fileStore = [];
+      selectedFileId = null;
+      render();
+    });
+
+    unitToggleBtn.addEventListener('click', () => {
+      unitSystem = unitSystem === 'metric' ? 'imperial' : 'metric';
+      unitToggleBtn.textContent = unitSystem === 'metric' ? 'Metric (km/m)' : 'Imperial (mi/ft)';
+      render();
+    });
+
+    // Tab Controls
+    tabQueueBtn.addEventListener('click', () => {
+      tabQueueView.classList.remove('hidden');
+      tabMapView.classList.add('hidden');
+      tabXmlView.classList.add('hidden');
+      tabQueueBtn.className = 'pb-3 border-b-2 border-blue-500 text-blue-400 flex items-center space-x-2';
+      tabMapBtn.className = 'pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2';
+      tabXmlBtn.className = 'pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2';
+    });
+
+    tabMapBtn.addEventListener('click', () => {
+      tabQueueView.classList.add('hidden');
+      tabMapView.classList.remove('hidden');
+      tabXmlView.classList.add('hidden');
+      tabQueueBtn.className = 'pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2';
+      tabMapBtn.className = 'pb-3 border-b-2 border-blue-500 text-blue-400 flex items-center space-x-2';
+      tabXmlBtn.className = 'pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2';
+      updateMap();
+    });
+
+    tabXmlBtn.addEventListener('click', () => {
+      tabQueueView.classList.add('hidden');
+      tabMapView.classList.add('hidden');
+      tabXmlView.classList.remove('hidden');
+      tabQueueBtn.className = 'pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2';
+      tabMapBtn.className = 'pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2';
+      tabXmlBtn.className = 'pb-3 border-b-2 border-blue-500 text-blue-400 flex items-center space-x-2';
+    });
+
+    overlayAllCheckbox.addEventListener('change', updateMap);
+    mapTrackSelect.addEventListener('change', (e) => {
+      selectedFileId = e.target.value;
+      overlayAllCheckbox.checked = false;
+      updateMap();
+    });
+
+    copyXmlBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(gpxXmlPreview.textContent);
+      copyXmlBtn.textContent = 'Copied!';
+      setTimeout(() => copyXmlBtn.textContent = 'Copy XML', 2000);
+    });
+
+    loadSampleBatchBtn.addEventListener('click', () => {
+      const samples = [
+        { name: 'Alpine_Hike_Loop.fit', latOff: 0, lonOff: 0 },
+        { name: 'Coastal_Run.fit', latOff: 0.015, lonOff: 0.012 },
+        { name: 'Summit_Bike_Climb.fit', latOff: -0.012, lonOff: -0.015 }
+      ];
+
+      samples.forEach(s => {
+        const buffer = createSyntheticFitBuffer(s.latOff, s.lonOff);
+        const id = Math.random().toString(36).substring(2, 9);
+        const records = parseFitBinary(buffer);
+        const stats = calculateTrackStats(records);
+        const gpxXml = generateGpxXml(records, s.name.replace(/\.fit$/i, ''));
+
+        fileStore.push({
+          id,
+          name: s.name,
+          size: buffer.byteLength,
+          status: 'success',
+          records,
+          stats,
+          gpxXml,
+          color: TRACK_COLORS[fileStore.length % TRACK_COLORS.length]
+        });
+      });
+
+      if (!selectedFileId && fileStore.length > 0) selectedFileId = fileStore[0].id;
+      render();
+    });
+
+    function createSyntheticFitBuffer(latOffset, lonOffset) {
+      const numPoints = 40;
+      const startLat = 37.7749 + latOffset;
+      const startLon = -122.4194 + lonOffset;
+      const startTimestamp = Math.floor(Date.now() / 1000) - GARMIN_EPOCH_OFFSET;
+
+      const headerSize = 14;
+      const defMsgSize = 15;
+      const dataMsgSize = 17;
+      const totalDataSize = defMsgSize + (dataMsgSize * numPoints);
+
+      const buffer = new ArrayBuffer(headerSize + totalDataSize);
+      const view = new DataView(buffer);
+
+      view.setUint8(0, 14);
+      view.setUint8(1, 0x20);
+      view.setUint16(2, 2000, true);
+      view.setUint32(4, totalDataSize, true);
+      view.setUint8(8, 0x2E); view.setUint8(9, 0x46); view.setUint8(10, 0x49); view.setUint8(11, 0x54);
+
+      let offset = 14;
+      view.setUint8(offset++, 0x40);
+      view.setUint8(offset++, 0x00);
+      view.setUint8(offset++, 0x00);
+      view.setUint16(offset, 20, true); offset += 2;
+      view.setUint8(offset++, 5);
+
+      const fields = [
+        { num: 0, size: 4, type: 5 },
+        { num: 1, size: 4, type: 5 },
+        { num: 2, size: 2, type: 4 },
+        { num: 3, size: 1, type: 2 },
+        { num: 253, size: 4, type: 6 }
+      ];
+
+      fields.forEach(f => {
+        view.setUint8(offset++, f.num);
+        view.setUint8(offset++, f.size);
+        view.setUint8(offset++, f.type);
+      });
+
+      for (let i = 0; i < numPoints; i++) {
+        const lat = startLat + (i * 0.0003);
+        const lon = startLon + (i * 0.0004);
+        const alt = 120 + Math.floor(Math.sin(i / 4) * 30);
+        const hr = 130 + Math.floor(Math.sin(i / 2) * 20);
+
+        view.setUint8(offset++, 0x00);
+        view.setInt32(offset, Math.round(lat / SEMICIRCLE_TO_DEG), true); offset += 4;
+        view.setInt32(offset, Math.round(lon / SEMICIRCLE_TO_DEG), true); offset += 4;
+        view.setUint16(offset, (alt + 500) * 5, true); offset += 2;
+        view.setUint8(offset++, hr);
+        view.setUint32(offset, startTimestamp + (i * 10), true); offset += 4;
+      }
+
+      return buffer;
+    }
+  </script>
+</body>
+</html>
